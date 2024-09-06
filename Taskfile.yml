@@ -8,7 +8,6 @@ vars:
   # app
   GO_VERSION: 1.23.0
   CGO_ENABLED: 0
-  APP_NAME: go-api
   SRC_DIR: src
   BUILD_DIR: build
   ENTRY_POINT: main.go
