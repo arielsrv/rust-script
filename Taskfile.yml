@@ -4,6 +4,8 @@ version: '3'
 includes:
   platform: Taskfile_{{OS}}.yml
 
+dotenv: [ '.env' ]
+
 vars:
   # app
   GO_VERSION: 1.23.0
