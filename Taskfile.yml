@@ -1,0 +1,250 @@
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: '3'
+
+includes:
+  platform: Taskfile_{{OS}}.yml
+
+vars:
+  # app
+  GO_VERSION: 1.23.0
+  CGO_ENABLED: 0
+  APP_NAME: go-api
+  SRC_DIR: src
+  BUILD_DIR: build
+  ENTRY_POINT: main.go
+  S: '{{if eq OS "windows"}}\{{else}}/{{end}}'
+  BIN: '{{.BUILD_DIR}}{{.S}}main{{.S}}{{.APP_NAME}}{{exeExt}}'
+
+  # tools
+  MOCKERY_CONFIG_DIR: '{{.SRC_DIR}}{{.S}}resources{{.S}}mocks'
+  REPORTS: '{{.BUILD_DIR}}{{.S}}reports'
+  SWAG_SRC_DIR: '{{.SRC_DIR}}'
+  SWAG_OUTPUT_DIR: '{{.SRC_DIR}}/resources/docs'
+
+  # docker
+  DOCKER_IMAGE: '{{.APP_NAME}}:latest'
+
+  # kubernetes
+  KUBERNETES_MANIFESTS_DIR: kustomize
+  KUBERNETES_APP_NAMESPACE: oms
+  KUBERNETES_APP_DEPLOYMENT_NAME: deployment.v1.apps/{{.APP_NAME}}--rolling-update
+  KUBERNETES_OUTPUT_DIR: '{{.BUILD_DIR}}{{.S}}kubernetes'
+  KUBERNETES_INGRESS: '{{.APP_NAME}}.127.0.0.1.nip.io'
+  KUBERNETES_CERT: '{{.BUILD_DIR}}{{.S}}certs'
+
+  # localstack
+  TF_DIR: '{{.SRC_DIR}}/resources/terraform'
+
+tasks:
+  setup:
+    cmds:
+      - task: platform:native
+      - task: platform:go
+
+  argocd:open-*:
+    silent: true
+    vars:
+      ENV: '{{index .MATCH 0}}'
+      ARGOCD_URL: 'https://argocd.{{.ENV}}.dp.iskaypet.com/applications/{{.KUBERNETES_APP_NAMESPACE}}-{{.APP_NAME}}'
+    cmds:
+      - echo '{{.ARGOCD_URL}}'
+
+  apm:open-*:
+    silent: true
+    vars:
+      ENV: '{{index .MATCH 0}}'
+      ARGOCD_URL: 'https://iskaylog.grafana.net/d/6bnfeorMz/apm?orgId=1&refresh=1m&var-environment=dp-{{.ENV}}&var-application=go-api&var-instance=All&var-path=All'
+    cmds:
+      - echo '{{.ARGOCD_URL}}'
+
+  logs:open-*:
+    silent: true
+    vars:
+      ENV: '{{index .MATCH 0}}'
+      ARGOCD_URL: 'https://iskaylog.grafana.net/explore?schemaVersion=1&panes=%7B%22l8h%22:%7B%22datasource%22:%22grafanacloud-logs%22,%22queries%22:%5B%7B%22refId%22:%22A%22,%22expr%22:%22%7Bservice_name%3D%5C%22go-api%5C%22,%20cluster%3D%5C%22dp-{{.ENV}}%5C%22%7D%22,%22queryType%22:%22range%22,%22datasource%22:%7B%22type%22:%22loki%22,%22uid%22:%22grafanacloud-logs%22%7D,%22editorMode%22:%22code%22%7D%5D,%22range%22:%7B%22from%22:%22now-1h%22,%22to%22:%22now%22%7D,%22panelsState%22:%7B%22logs%22:%7B%22columns%22:%7B%220%22:%22Time%22,%221%22:%22Line%22%7D,%22visualisationType%22:%22table%22,%22labelFieldName%22:%22labels%22,%22refId%22:%22A%22%7D%7D%7D%7D&orgId=1'
+    cmds:
+      - echo '{{.ARGOCD_URL}}'
+
+  cicd:token:
+    cmd: echo {{.CICD_TOKEN}}
+
+  tf:clean:
+    cmds:
+      - rm -rf {{.BUILD_DIR}}/terraform
+
+  tf:init:
+    silent: true
+    cmds:
+      - task: platform:tf:mkdir
+      - (cd {{.TF_DIR}} || exit ; terraform init)
+
+  tf:apply:
+    silent: true
+    cmds:
+      - task: platform:tf:mkdir
+      - (cd {{.TF_DIR}} || exit ; terraform apply -auto-approve)
+
+  k:fix:
+    desc: k8s fix
+    cmds:
+      - "echo Kubernetes context: $(kubectl config current-context)"
+      - task: platform:k:fix
+
+  k:mkdir:
+    cmds:
+      - "echo OS: {{OS}}, ARCH: {{ARCH}}, CGO_ENABLED: {{.CGO_ENABLED}}"
+      - task: platform:k:mkdir
+
+  tf:mkdir:
+    cmds:
+      - "echo OS: {{OS}}, ARCH: {{ARCH}}, CGO_ENABLED: {{.CGO_ENABLED}}"
+      - task: platform:tf:mkdir
+
+  k:build:
+    desc: 'k8s build (output: {{.KUBERNETES_OUTPUT_DIR}})'
+    cmds:
+      - "echo Kubernetes current context: $(kubectl config current-context)"
+      - task: k:mkdir
+      - task: platform:k:build
+
+  k:apply:
+    desc: k8s apply
+    cmds:
+      - task: k:build
+      - task: platform:k:apply
+
+  cert:mkdir:
+    cmds:
+      - task: platform:cert:mkdir
+
+  k:tls:
+    cmds:
+      - task: cert:mkdir
+      - task: platform:cert:install
+      - task: platform:k:tls
+
+  k:ping:
+    desc: k8s ingress ping
+    cmds:
+      - curl https://{{.KUBERNETES_INGRESS}}/ping
+
+  k:run:
+    desc: Run relevant kubernetes tasks.
+    cmds:
+      - task: release
+      - task: docker:build
+      - task: k:build
+      - task: k:apply
+      - task: k:ping
+    preconditions:
+      - kubectl get namespace {{.KUBERNETES_APP_NAMESPACE}}
+      - kubectl get secret {{.APP_NAME}}--secret -n {{.KUBERNETES_APP_NAMESPACE}}
+
+  netrc:
+    silent: true
+    cmds:
+      - sdk-cli netrc
+
+  docker:build:
+    silent: true
+    vars:
+      CICD_TOKEN:
+        sh: task netrc
+    cmds:
+      - docker build -t {{.DOCKER_IMAGE}} . --build-arg=GITLAB_TOKEN={{.CICD_TOKEN}}
+
+  docker:run:
+    desc: docker run
+    silent: true
+    deps: [ docker:build ]
+    vars:
+      ENV: localstack
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    cmds:
+      - task: platform:docker:run
+
+  lint:
+    desc: Use golangci-lint (.golangci.yml).
+    cmds:
+      - go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --fix
+      - go run mvdan.cc/gofumpt@latest -w -l .
+      - go run github.com/dkorunic/betteralign/cmd/betteralign@latest -test_files -generated_files -apply ./...
+
+  panic:
+    cmds:
+      - nilaway ./...
+
+  test:race:
+    desc: Race conditions check for unit test.
+    cmds:
+      - go test -race ./...
+
+  test:
+    cmds:
+      - task: test:unit
+      - task: test:race
+
+  test:cover:
+    cmds:
+      - task: platform:test:cover
+
+  test:unit:
+    desc: Run unit test.
+    cmds:
+      - go test ./...
+
+  test:shuffle:
+    desc: Run unit test multiple times
+    cmds:
+      - go run gotest.tools/gotestsum@latest -f testname -- ./... -race -count=15 -shuffle=on
+
+  test:mock:
+    desc: Create mocks
+    cmds:
+      - mockery --config "{{.MOCKERY_CONFIG_DIR}}{{.S}}.mockery.yaml"
+
+  download:
+    desc: Run go mod tidy.
+    cmds:
+      - go mod tidy -v
+
+  upgrade:
+    deps: [ download ]
+    desc: Check for latest direct dependencies.
+    cmds:
+      - go-mod-upgrade
+      - task: download
+
+  swagger:
+    cmds:
+      - go get -u github.com/gofiber/swagger
+      - go run github.com/swaggo/swag/cmd/swag@latest init -d {{.SWAG_SRC_DIR}} -g {{.ENTRY_POINT}} -o {{.SWAG_OUTPUT_DIR}} --parseGoList --parseDependency
+
+  build:
+    desc: 'Build the go exe (output: {{.BIN}})'
+    deps: [ download ]
+    cmds:
+      - "echo OS: {{OS}}, ARCH: {{ARCH}}, CGO_ENABLED: {{.CGO_ENABLED}}"
+      - go build -v -o "{{.BIN}}" "{{.SRC_DIR}}{{.S}}{{.ENTRY_POINT}}"
+
+  run:
+    desc: 'runs the main {{.BIN}}'
+    deps: [ build ]
+    cmds:
+      - task: platform:run
+
+  live:
+    cmds:
+      - go run github.com/air-verse/air@latest --build.cmd "task build" --build.bin {{.BIN}}
+
+  release:
+    desc: Run relevant tasks.
+    cmds:
+      - task: download
+      - task: test
+      - task: build
+
+  default:
+    cmds:
+      - task: release

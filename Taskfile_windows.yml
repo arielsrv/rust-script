@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=https://json.schemastore.org/taskfile.json
+version: '3'
+
+tasks:
+  upgrade:
+    cmds:
+      - choco upgrade all
+      - task: go
+  native:
+    cmds:
+      - choco install go
+      - choco install kustomize
+      - choco install kubernetes-cli
+      - choco install mkcert
+      - choco install curl
+      - choco install mingw
+  go:
+    cmds:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.56.2
+      - go install github.com/vektra/mockery/v2@latest
+      - go install github.com/oligot/go-mod-upgrade@latest
+      - go install github.com/swaggo/swag/cmd/swag@latest
+      - go install gitlab.com/iskaypetcom/digital/sre/tools/dev/sdk-cli@latest
+
+  k:fix:
+    cmds:
+      - cmd /c "cd /d {{.KUBERNETES_MANIFESTS_DIR}}{{.S}}base && kustomize edit fix --vars"
+      - cmd /c "cd /d {{.KUBERNETES_MANIFESTS_DIR}}{{.S}}overlays{{.S}}{{.CLI_ARGS}} && kustomize edit fix --vars"
+
+  k:mkdir:
+    cmds:
+      - cmd /c "if not exist {{.KUBERNETES_OUTPUT_DIR}} mkdir {{.KUBERNETES_OUTPUT_DIR}}"
+
+  k:build:
+    vars:
+      ENV: '{{.CLI_ARGS | default "local"}}'
+    cmds:
+      - cmd /c "kustomize build {{.KUBERNETES_MANIFESTS_DIR}}{{.S}}overlays{{.S}}{{.ENV}} ^
+        --output {{.KUBERNETES_OUTPUT_DIR}}{{.S}}release.yaml ^
+        --load-restrictor LoadRestrictionsNone"
+
+  k:tls:
+    cmds:
+      - |
+        cmd /c "kubectl apply -f {{.KUBERNETES_MANIFESTS_DIR}}{{.S}}overlays{{.S}}local{{.S}}namespace.yaml
+        kubectl create secret tls {{.APP_NAME}}--secret ^
+          --cert {{.KUBERNETES_CERT}}{{.S}}{{.KUBERNETES_INGRESS}}.pem ^
+          --key  {{.KUBERNETES_CERT}}{{.S}}{{.KUBERNETES_INGRESS}}-key.pem ^
+          -n {{.KUBERNETES_APP_NAMESPACE}}"
+
+  k:apply:
+    cmds:
+      - cmd /c "kubectl apply -f {{.KUBERNETES_OUTPUT_DIR}}{{.S}}release.yaml"
+      - cmd /c "kubectl rollout restart {{.KUBERNETES_APP_DEPLOYMENT_NAME}} -n {{.KUBERNETES_APP_NAMESPACE}}"
+      - cmd /c "kubectl rollout status {{.KUBERNETES_APP_DEPLOYMENT_NAME}} -n {{.KUBERNETES_APP_NAMESPACE}}"
+
+  tf:mkdir:
+    cmds:
+      - cmd /c "if not exist {{.BUILD_DIR}} mkdir {{.BUILD_DIR}}"
+
+  docker:run:
+    silent: true
+    vars:
+      ENV: localstack
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    cmds:
+      - cmd /c "docker run -p 8081:8081 --name {{.APP_NAME}} ^
+        -e APP_NAME={{.APP_NAME}} ^
+        -e ENV={{.ENV}} ^
+        -e AWS_ACCESS_KEY_ID={{.AWS_ACCESS_KEY_ID}} ^
+        -e AWS_SECRET_ACCESS_KEY={{.AWS_SECRET_ACCESS_KEY}} ^
+        {{.DOCKER_IMAGE}}"
+
+  docker:stop:
+    silent: true
+    cmds:
+      - docker stop {{.APP_NAME}} && docker rm {{.APP_NAME}}
+
+  cert:mkdir:
+    cmds:
+      - cmd /c "if not exist {{.KUBERNETES_CERT}} mkdir {{.KUBERNETES_CERT}}"
+
+  cert:install:
+    cmds:
+      - cmd /c "cd /d {{.KUBERNETES_CERT}} && mkcert --install {{.KUBERNETES_INGRESS}}"
+
+  test:cover:
+    cmds:
+      - cmd /c "if not exist {{.REPORTS}} mkdir {{.REPORTS}}"
+      - cmd /c "go test -coverprofile {{.REPORTS}}{{.S}}cover.out ./{{.SRC_DIR}}/..."
+      - cmd /c "go tool cover -html {{.REPORTS}}{{.S}}cover.out -o {{.REPORTS}}{{.S}}cover.html"
+      - cmd /c "go tool cover -func={{.REPORTS}}{{.S}}cover.out"
+
+  run:
+    cmds:
+      - cmd /c '{{.BIN}}'
