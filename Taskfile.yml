@@ -139,16 +139,11 @@ tasks:
       - kubectl get namespace {{.KUBERNETES_APP_NAMESPACE}}
       - kubectl get secret {{.APP_NAME}}--secret -n {{.KUBERNETES_APP_NAMESPACE}}
 
-  netrc:
-    silent: true
-    cmds:
-      - sdk-cli netrc
-
   docker:build:
     silent: true
     vars:
       CICD_TOKEN:
-        sh: task netrc
+        sh: sdk-cli netrc
     cmds:
       - docker build -t {{.DOCKER_IMAGE}} . --build-arg=GITLAB_TOKEN={{.CICD_TOKEN}}
 
