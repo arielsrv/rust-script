@@ -31,5 +31,5 @@ alias task="APP_NAME=go-api task --taskfile https://raw.githubusercontent.com/ar
 
 ## env
 ```bash
-alias task="task --taskfile https://raw.githubusercontent.com/arielsrv/rust-script/main/Taskfile.yml"
+alias task="TASK_X_REMOTE_TASKFILES=1 task --taskfile https://raw.githubusercontent.com/arielsrv/rust-script/main/Taskfile.yml"
 ```
