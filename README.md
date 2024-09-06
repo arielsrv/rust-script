@@ -28,3 +28,8 @@ alias task="export APP_NAME=$(cat .pets) ; task --taskfile https://raw.githubuse
 ```bash
 alias task="APP_NAME=go-api task --taskfile https://raw.githubusercontent.com/arielsrv/rust-script/main/Taskfile.yml"
 ```
+
+## env
+```bash
+alias task="task --taskfile https://raw.githubusercontent.com/arielsrv/rust-script/main/Taskfile.yml"
+```

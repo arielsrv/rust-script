@@ -232,7 +232,7 @@ tasks:
 
   live:
     cmds:
-      - go run github.com/air-verse/air@latest --build.cmd "task build" --build.bin {{.BIN}}
+      - go run github.com/air-verse/air@latest --build.cmd "go build -v -o {{.BIN}} {{.SRC_DIR}}{{.S}}{{.ENTRY_POINT}}" --build.bin {{.BIN}}
 
   release:
     desc: Run relevant tasks.
